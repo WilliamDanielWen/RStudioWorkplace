@@ -1,0 +1,64 @@
+library(h2o)
+library(dplyr)
+library(leaps)
+library(Metrics)
+
+H2O <- h2o.init(ip = "localhost", port = 54321, startH2O = TRUE)
+
+## Start a local cluster with 2GB RAM
+localH2O = h2o.init(ip = "localhost", port = 54321, startH2O = TRUE)
+
+test <- read.csv(file = "developmentSet-pv13.csv", stringsAsFactors = F)
+train <- read.csv(file = "subTrainSet-pv13.csv", stringsAsFactors = F)
+
+subTrain <- sample_frac(train,0.6)
+
+tmp <- anti_join(train,subTrain, by='id')
+
+subDev <- sample_frac(tmp, 0.4)
+
+subTest <-  anti_join(tmp,subDev, by='id')
+
+#write.csv(subTrain, file="train-v7.csv", row.names = F)
+#write.csv(subTest, file="development-v7.csv", row.names = F)
+
+tr <- subTrain[,4:ncol(subTrain)]
+#tr$relevance <- (log(tr$relevance))^2
+
+td <- subDev[,4:ncol(subDev)]
+#td$relevance <- (log(td$relevance))^2
+
+ts_in <- subTest[,4:(ncol(subTest)-1)]
+ts_out <- subTest[,ncol(subTest)]
+
+
+tr_h2o <- as.h2o(tr, 'tr')
+td_h2o <- as.h2o(td, 'td')
+ts_h2o <- as.h2o(ts_in, 'ts_in')
+
+model <- h2o.deeplearning(x = 1:17,  # column numbers for predictors
+                          y = 18,   # column number for label
+                          training_frame = tr_h2o, # data in H2O format
+                          validation_frame = td_h2o, #validation frame
+                          seed = 123,
+                          activation = "Tanh", # or 'Tanh'
+                          max_runtime_secs = 0,
+                          #variable_importances = TRUE,
+                          input_dropout_ratio = 0.01, # % of inputs dropout
+                          hidden_dropout_ratios = c(0.5), # % for nodes dropout
+                          hidden = c(200), # three layers of 50 nodes
+                          epochs = 150) # max. no. of epochs
+
+h2o_yhat_test <- h2o.predict(model, ts_h2o)
+
+df_yhat_test <- as.data.frame(h2o_yhat_test)
+
+#ts_pr <- exp(sqrt(df_yhat_test[,1]))
+ts_pr <- df_yhat_test[,1]
+
+err_rf <- rmse(ts_out,ts_pr)
+
+print(err_rf)
+#rectifier: 0.4926
+#max_out:   0.4924; (h:200 ep:150, 0.4917); (h:300 ep:150, 0.4924);; (h:220 ep:150, 0.4927)
+#
